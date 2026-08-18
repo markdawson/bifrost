@@ -399,9 +399,11 @@ const (
 // PluginConfig is the configuration for a plugin.
 // It contains the name of the plugin, whether it is enabled, and the configuration for the plugin.
 type PluginConfig struct {
-	Enabled   bool             `json:"enabled"`
-	Name      string           `json:"name"`
-	Path      *string          `json:"path,omitempty"`
+	Enabled bool    `json:"enabled"`
+	Name    string  `json:"name"`
+	Path    *string `json:"path,omitempty"`
+	// Version no longer drives reconciliation (config.json edits are detected by hash),
+	// but is still accepted and hashed so pre-existing configs keep their stored hash.
 	Version   *int16           `json:"version,omitempty"`
 	Config    any              `json:"config,omitempty"`
 	Placement *PluginPlacement `json:"placement,omitempty"` // "pre_builtin" or "post_builtin". Default: "post_builtin"

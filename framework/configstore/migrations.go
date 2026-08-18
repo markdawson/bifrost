@@ -3133,6 +3133,43 @@ func migrationAddAdditionalConfigHashColumns(ctx context.Context, db *gorm.DB, l
 	return nil
 }
 
+// MigrationBackfillPluginConfigHashesFromFile records a config.json baseline hash on plugin
+// rows, keyed by plugin name. It complements migrationAddAdditionalConfigHashColumns, which
+// only backfills config_plugins.config_hash on databases that predate the column - nothing
+// else ever wrote it, so rows on any database created since carry an empty hash and startup
+// reconciliation would read every one of them as "config.json changed" and revert the stored
+// config. Writing the file's hash leaves the stored config alone, so UI/API edits survive,
+// and the next edit to that config.json entry reconciles normally.
+//
+// Unlike the migrations above it takes its input from the caller: config.json is parsed by
+// the transport, long after the store has run its own migrations, so this is invoked through
+// ConfigStore.RunMigration. Rows that already carry a hash are overwritten - the case is
+// rare, and the outcome is the same rule applied uniformly.
+func MigrationBackfillPluginConfigHashesFromFile(ctx context.Context, db *gorm.DB, logger schemas.Logger, fileHashes map[string]string) error {
+	migrationName := "backfill_plugin_config_hashes_from_file"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	return RunSingleMigration(ctx, nil, db, logger, &migrator.Migration{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			logger.Info("[configstore] %s: processing %d plugins", migrationName, len(fileHashes))
+			for name, hash := range fileHashes {
+				// Column-only write: the stored configuration must not change, and
+				// updated_at must keep pointing at the last real edit.
+				if err := tx.WithContext(ctx).Model(&tables.TablePlugin{}).
+					Where("name = ?", name).
+					UpdateColumn("config_hash", hash).Error; err != nil {
+					return fmt.Errorf("failed to backfill hash for plugin %s: %w", name, err)
+				}
+			}
+			return nil
+		},
+		// The hashes are change-detection state, not configuration: dropping them would
+		// only make the next startup re-sync every plugin from config.json.
+		Rollback: func(tx *gorm.DB) error { return nil },
+	})
+}
+
 // migrationAdd200kTokenPricingColumns adds pricing columns for 200k token tier models
 func migrationAdd200kTokenPricingColumns(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
 	migrationName := "add_200k_token_pricing_columns"
