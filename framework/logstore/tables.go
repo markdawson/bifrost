@@ -1965,6 +1965,7 @@ const (
 	DimensionCustomer     HistogramDimension = "customer_id"
 	DimensionUser         HistogramDimension = "user_id"
 	DimensionBusinessUnit HistogramDimension = "business_unit_id"
+	DimensionProject      HistogramDimension = "project_id"
 	DimensionApp          HistogramDimension = "app"
 	DimensionUserAgent    HistogramDimension = "user_agent"
 )
@@ -1976,6 +1977,7 @@ var ValidHistogramDimensions = map[HistogramDimension]bool{
 	DimensionCustomer:     true,
 	DimensionUser:         true,
 	DimensionBusinessUnit: true,
+	DimensionProject:      true,
 	DimensionApp:          true,
 	DimensionUserAgent:    true,
 }
@@ -1996,6 +1998,8 @@ func histogramDimensionColumn(dimension HistogramDimension) (string, bool) {
 		return "user_id", true
 	case DimensionBusinessUnit:
 		return "business_unit_id", true
+	case DimensionProject:
+		return "project_id", true
 	}
 	return "", false
 }
@@ -2176,6 +2180,7 @@ const (
 	RankingDimensionTeam         RankingDimension = "team"
 	RankingDimensionCustomer     RankingDimension = "customer"
 	RankingDimensionBusinessUnit RankingDimension = "business_unit"
+	RankingDimensionProject      RankingDimension = "project"
 	RankingDimensionUser         RankingDimension = "user"
 	RankingDimensionVirtualKey   RankingDimension = "virtual_key"
 	RankingDimensionApp          RankingDimension = "app"
@@ -2186,6 +2191,7 @@ var ValidRankingDimensions = map[RankingDimension]bool{
 	RankingDimensionTeam:         true,
 	RankingDimensionCustomer:     true,
 	RankingDimensionBusinessUnit: true,
+	RankingDimensionProject:      true,
 	RankingDimensionUser:         true,
 	RankingDimensionVirtualKey:   true,
 	RankingDimensionApp:          true,
@@ -2201,6 +2207,7 @@ var dimensionColumns = map[RankingDimension]dimensionColumnDef{
 	RankingDimensionTeam:         {IDCol: "team_id", NameCol: "team_name"},
 	RankingDimensionCustomer:     {IDCol: "customer_id", NameCol: "customer_name"},
 	RankingDimensionBusinessUnit: {IDCol: "business_unit_id", NameCol: "business_unit_name"},
+	RankingDimensionProject:      {IDCol: "project_id", NameCol: "project_name"},
 	RankingDimensionUser:         {IDCol: "user_id", NameCol: "user_name"},
 	RankingDimensionVirtualKey:   {IDCol: "virtual_key_id", NameCol: "virtual_key_name"},
 	RankingDimensionApp:          {IDCol: "app", NameCol: "app"},
