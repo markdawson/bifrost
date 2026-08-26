@@ -475,6 +475,7 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_ultrafast_pricing_columns"}, run: migrationAddUltrafastPricingColumns},
 	{IDs: []string{"add_image_size_quality_pricing_columns"}, run: migrationAddImageSizeQualityPricingColumns},
 	{IDs: []string{"add_batch_jobs_attribution_columns"}, run: migrationAddBatchJobsAttributionColumns},
+	{IDs: []string{"add_time_of_day_pricing_columns"}, run: migrationAddTimeOfDayPricingColumns},
 }
 
 // migrationAddBatchJobsAttributionColumns adds the requester-identity columns to
@@ -12229,6 +12230,45 @@ func migrationAddImageSizeQualityPricingColumns(ctx context.Context, db *gorm.DB
 		"output_cost_per_image_above_1024x1024_pixels_standard_quality",
 		"output_cost_per_image_above_1024x1536_pixels_standard_quality",
 		"output_cost_per_image_above_1536x1024_pixels_standard_quality",
+	}
+	m := migrator.New(db, migrator.DefaultOptions, []*migrator.Migration{{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			for _, field := range columns {
+				if err := addColumnIfNotExists(tx, logger, &tables.TableModelPricing{}, field); err != nil {
+					return fmt.Errorf("failed to add column %s: %w", field, err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			for _, field := range columns {
+				if err := dropColumnIfExists(tx, logger, &tables.TableModelPricing{}, field); err != nil {
+					return fmt.Errorf("failed to drop column %s: %w", field, err)
+				}
+			}
+			return nil
+		},
+	}})
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("error running %s migration: %s", migrationName, err.Error())
+	}
+	return nil
+}
+
+// migrationAddTimeOfDayPricingColumns adds the peak/off-peak pricing columns to
+// governance_model_pricing. Providers such as DeepSeek bill the same model at
+// two different rates depending on the time of day; off_peak_cost_multiplier
+// scales usage-based charges outside the windows declared in peak_hours.
+func migrationAddTimeOfDayPricingColumns(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "add_time_of_day_pricing_columns"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	columns := []string{
+		"off_peak_cost_multiplier",
+		"peak_hours",
 	}
 	m := migrator.New(db, migrator.DefaultOptions, []*migrator.Migration{{
 		ID: migrationName,
