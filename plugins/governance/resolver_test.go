@@ -551,6 +551,21 @@ func TestBudgetResolver_IsProviderAllowed(t *testing.T) {
 			provider:        schemas.OpenAI,
 			shouldBeAllowed: false,
 		},
+		{
+			name:            "Allow all providers with no configs",
+			vk:              withAllowAllProviders(buildVirtualKey("vk1", "sk-bf-test", "Test", true)),
+			provider:        schemas.OpenAI,
+			shouldBeAllowed: true,
+		},
+		{
+			name: "Allow all providers permits a provider that has no config",
+			vk: withAllowAllProviders(buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test",
+				[]configstoreTables.TableVirtualKeyProviderConfig{
+					buildProviderConfig("anthropic", []string{"claude-3-sonnet"}),
+				})),
+			provider:        schemas.OpenAI,
+			shouldBeAllowed: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -622,6 +637,48 @@ func TestBudgetResolver_IsModelAllowed(t *testing.T) {
 			provider:        schemas.OpenAI,
 			model:           "gpt-4o-mini",
 			shouldBeAllowed: false,
+		},
+		{
+			name:            "Allow all providers with no configs (any model allowed)",
+			vk:              withAllowAllProviders(buildVirtualKey("vk1", "sk-bf-test", "Test", true)),
+			provider:        schemas.OpenAI,
+			model:           "gpt-4o-mini",
+			shouldBeAllowed: true,
+		},
+		{
+			name: "Allow all providers: unconfigured provider allows any model",
+			vk: withAllowAllProviders(buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test",
+				[]configstoreTables.TableVirtualKeyProviderConfig{
+					buildProviderConfig("anthropic", []string{"claude-3-sonnet"}),
+				})),
+			provider:        schemas.OpenAI,
+			model:           "gpt-4o-mini",
+			shouldBeAllowed: true,
+		},
+		{
+			name: "Allow all providers: a configured provider still enforces its allowlist",
+			vk: withAllowAllProviders(buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test",
+				[]configstoreTables.TableVirtualKeyProviderConfig{
+					buildProviderConfig("openai", []string{"gpt-4"}),
+				})),
+			provider:        schemas.OpenAI,
+			model:           "gpt-4o-mini",
+			shouldBeAllowed: false,
+		},
+		{
+			// Real timeline: the key was saved with allow-all on, so it holds ["*"] snapshot rows
+			// for the providers known then. A provider added system-wide afterwards has no row yet,
+			// but AllowAllProviders must still allow its models so the model gate agrees with
+			// isProviderAllowed granting the provider.
+			name: "Allow all providers: provider added after snapshot (no row) allows any model",
+			vk: withAllowAllProviders(buildVirtualKeyWithProviders("vk1", "sk-bf-test", "Test",
+				[]configstoreTables.TableVirtualKeyProviderConfig{
+					buildProviderConfig("openai", []string{"*"}),
+					buildProviderConfig("anthropic", []string{"*"}),
+				})),
+			provider:        schemas.Cohere,
+			model:           "command-r-plus",
+			shouldBeAllowed: true,
 		},
 	}
 

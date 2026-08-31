@@ -167,8 +167,8 @@ func (p *GovernancePlugin) filterModelsForVirtualKey(
 		return []schemas.Model{} // VK not found, return empty list
 	}
 
-	// Empty ProviderConfigs means no models are allowed (deny-by-default)
-	if len(vk.ProviderConfigs) == 0 {
+	// Empty ProviderConfigs with no allow-all means no models are allowed (deny-by-default)
+	if len(vk.ProviderConfigs) == 0 && !vk.AllowAllProviders {
 		return []schemas.Model{}
 	}
 
@@ -178,14 +178,28 @@ func (p *GovernancePlugin) filterModelsForVirtualKey(
 		provider, modelName := schemas.ParseModelString(model.ID, "")
 
 		// Pre-pass: if any matching config blacklists the model, block it entirely.
+		// Also note whether this provider has any config at all.
 		isBlocked := false
+		hasProviderConfig := false
 		for _, pc := range vk.ProviderConfigs {
-			if pc.Provider == string(provider) && pc.BlacklistedModels.IsBlocked(modelName) {
-				isBlocked = true
-				break
+			if pc.Provider == string(provider) {
+				hasProviderConfig = true
+				if pc.BlacklistedModels.IsBlocked(modelName) {
+					isBlocked = true
+					break
+				}
 			}
 		}
 		if isBlocked {
+			continue
+		}
+
+		// A provider with no config is allowed every model only when the VK allows all
+		// providers; a configured provider keeps its own allowlist (checked below).
+		if !hasProviderConfig {
+			if vk.AllowAllProviders {
+				filteredModels = append(filteredModels, model)
+			}
 			continue
 		}
 

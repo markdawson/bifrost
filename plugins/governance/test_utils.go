@@ -116,6 +116,13 @@ func buildVirtualKeyWithProviders(id, value, name string, providers []configstor
 	return vk
 }
 
+// withAllowAllProviders sets the AllowAllProviders flag and returns the same VK, for chaining
+// in table-driven tests.
+func withAllowAllProviders(vk *configstoreTables.TableVirtualKey) *configstoreTables.TableVirtualKey {
+	vk.AllowAllProviders = true
+	return vk
+}
+
 func buildBudget(id string, maxLimit float64, resetDuration string) *configstoreTables.TableBudget {
 	return &configstoreTables.TableBudget{
 		ID:            id,

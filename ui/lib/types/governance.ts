@@ -106,6 +106,8 @@ export interface VirtualKey {
 	is_active: boolean;
 	expires_at?: string | null; // ISO 8601 UTC timestamp; null or absent means never expires
 	calendar_aligned?: boolean;
+	// When true, every provider is allowed; provider_configs remain optional per-provider overrides
+	allow_all_providers?: boolean;
 	created_at: string;
 	updated_at: string;
 	// Populated relationships
@@ -217,6 +219,7 @@ export interface CreateVirtualKeyRequest {
 	rate_limit?: CreateRateLimitRequest;
 	is_active?: boolean;
 	calendar_aligned?: boolean;
+	allow_all_providers?: boolean; // When true, all providers are allowed
 	expires_at?: string; // RFC3339 UTC timestamp; omit for a key that never expires
 }
 
@@ -231,6 +234,7 @@ export interface UpdateVirtualKeyRequest {
 	rate_limit?: UpdateRateLimitRequest;
 	is_active?: boolean;
 	calendar_aligned?: boolean;
+	allow_all_providers?: boolean; // When true, all providers are allowed; omit to leave unchanged
 	reset_budget_usage?: boolean;
 	expires_at?: string; // RFC3339 UTC timestamp sets a new expiry, "" clears it, omit to leave unchanged
 }

@@ -378,16 +378,23 @@ func (r *BudgetResolver) EvaluateVirtualKeyRequest(ctx *schemas.BifrostContext, 
 // Blacklisted models win over allowed models (same semantics as provider-key enforcement).
 // Two-pass: blacklist scan across all matching configs first, then allowlist scan.
 func (r *BudgetResolver) isModelAllowed(vk *configstoreTables.TableVirtualKey, provider schemas.ModelProvider, model string) bool {
-	// Empty ProviderConfigs means no models are allowed (deny-by-default)
-	if len(vk.ProviderConfigs) == 0 {
-		return false
+	// Pass 1: if any matching provider config blacklists the model, block immediately.
+	// Also note whether this provider has any config at all.
+	hasProviderConfig := false
+	for _, pc := range vk.ProviderConfigs {
+		if pc.Provider == string(provider) {
+			hasProviderConfig = true
+			if pc.BlacklistedModels.IsBlocked(model) {
+				return false
+			}
+		}
 	}
 
-	// Pass 1: if any matching provider config blacklists the model, block immediately.
-	for _, pc := range vk.ProviderConfigs {
-		if pc.Provider == string(provider) && pc.BlacklistedModels.IsBlocked(model) {
-			return false
-		}
+	// A provider with an explicit config keeps its own model allow/blacklist. A provider with
+	// no config is allowed to run every model only when the VK allows all providers; otherwise
+	// (deny-by-default) it is not allowed.
+	if !hasProviderConfig {
+		return vk.AllowAllProviders
 	}
 
 	// Pass 2: allowlist check — model is allowed if any matching config permits it.
@@ -413,6 +420,11 @@ func (r *BudgetResolver) isModelAllowed(vk *configstoreTables.TableVirtualKey, p
 
 // isProviderAllowed checks if the requested provider is allowed for this VK
 func (r *BudgetResolver) isProviderAllowed(vk *configstoreTables.TableVirtualKey, provider schemas.ModelProvider) bool {
+	// AllowAllProviders grants access to every provider, regardless of ProviderConfigs.
+	if vk.AllowAllProviders {
+		return true
+	}
+
 	// Empty ProviderConfigs means no providers are allowed (deny-by-default)
 	if len(vk.ProviderConfigs) == 0 {
 		return false

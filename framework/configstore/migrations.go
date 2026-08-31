@@ -475,6 +475,37 @@ var configstoreMigrationSteps = []migrationStep{
 	{IDs: []string{"add_ultrafast_pricing_columns"}, run: migrationAddUltrafastPricingColumns},
 	{IDs: []string{"add_image_size_quality_pricing_columns"}, run: migrationAddImageSizeQualityPricingColumns},
 	{IDs: []string{"add_batch_jobs_attribution_columns"}, run: migrationAddBatchJobsAttributionColumns},
+	{IDs: []string{"add_allow_all_providers_to_virtual_key"}, run: migrationAddAllowAllProvidersToVirtualKey},
+}
+
+// migrationAddAllowAllProvidersToVirtualKey adds the allow_all_providers column to the virtual
+// key table. Default false preserves the existing deny-by-default behaviour, so no backfill is
+// needed: existing VKs keep allowing only the providers in their ProviderConfigs.
+func migrationAddAllowAllProvidersToVirtualKey(ctx context.Context, db *gorm.DB, logger schemas.Logger) error {
+	migrationName := "add_allow_all_providers_to_virtual_key"
+	logger.Info("[configstore] starting migration %s", migrationName)
+	defer logger.Info("[configstore] finished migration %s", migrationName)
+	m := migrator.New(db, migrator.DefaultOptions, []*migrator.Migration{{
+		ID: migrationName,
+		Migrate: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			if err := addColumnIfNotExists(tx, logger, &tables.TableVirtualKey{}, "allow_all_providers"); err != nil {
+				return err
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx = tx.WithContext(ctx)
+			if err := dropColumnIfExists(tx, logger, &tables.TableVirtualKey{}, "allow_all_providers"); err != nil {
+				return err
+			}
+			return nil
+		},
+	}})
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("error while running add allow_all_providers to virtual key migration: %s", err.Error())
+	}
+	return nil
 }
 
 // migrationAddBatchJobsAttributionColumns adds the requester-identity columns to
