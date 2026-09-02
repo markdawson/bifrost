@@ -1,3 +1,4 @@
+[feat]: add per-profile `message_format` (`flat` | `parts`); `parts` emits OTel GenAI semconv message parts and mirrors instructions as `gen_ai.system_instructions` [@markdawson](https://github.com/markdawson)
 - feat: `bifrost_overhead_latency_microseconds` histogram derived from the root span's overhead attribute, with a microsecond-scale bucket set (#6345)
 - chore: remove the legacy `gen_ai.*`-namespaced Bifrost-internal attributes, `gen_ai.usage.prompt_tokens`/`completion_tokens` and the nanosecond `time_to_first_token` attribute; `buildSpanAttrs` and `entitySetFromAttrs` read the canonical `bifrost.*` keys and `time_to_first_chunk` directly (#6403)
   <Warning>
