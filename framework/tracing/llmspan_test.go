@@ -176,3 +176,27 @@ func TestPopulateRequestExtraParamsSerializesStructuredValues(t *testing.T) {
 		})
 	}
 }
+
+func TestPopulateResponsesRequestAttributesExportsInstructions(t *testing.T) {
+	instructions := "Code every brand mention in the answer."
+	attrs := map[string]any{}
+
+	PopulateResponsesRequestAttributes(&schemas.BifrostResponsesRequest{
+		Params: &schemas.ResponsesParameters{Instructions: &instructions},
+	}, attrs)
+
+	if got := attrs[schemas.AttrInstructions]; got != instructions {
+		t.Fatalf("instructions attribute = %v, want %q", got, instructions)
+	}
+
+	// Absent or empty instructions must not produce the attribute at all.
+	for _, in := range []*string{nil, new(string)} {
+		attrs = map[string]any{}
+		PopulateResponsesRequestAttributes(&schemas.BifrostResponsesRequest{
+			Params: &schemas.ResponsesParameters{Instructions: in},
+		}, attrs)
+		if _, ok := attrs[schemas.AttrInstructions]; ok {
+			t.Fatalf("instructions attribute set for %v, want absent", in)
+		}
+	}
+}
