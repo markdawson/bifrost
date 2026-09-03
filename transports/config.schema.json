@@ -3533,6 +3533,11 @@
         },
         "plugin_span_filter": {
           "$ref": "#/$defs/plugin_span_filter"
+        },
+        "exclude_virtual_keys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Virtual keys (by id or name, exact match) whose traces are never exported to any profile — no spans and no trace-derived metrics. The requests themselves still reach Bifrost's own logs and governance. Use it for a caller whose volume would swamp a trace store (a batch sweep, a load test)."
         }
       },
       "required": ["profiles"],
