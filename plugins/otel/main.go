@@ -216,6 +216,15 @@ type Config struct {
 	// single-object config it is read from the object; in a profiles wrapper it is read
 	// from the top-level field (or hoisted from the first profile that carries one).
 	PluginSpanFilter *PluginSpanFilter `json:"plugin_span_filter,omitempty"`
+
+	// ExcludeVirtualKeys lists virtual keys whose traces are never exported. A finished
+	// trace is dropped for every profile — no spans and no trace-derived metrics — when any
+	// of its spans carries a listed value as bifrost.virtual_key.id or bifrost.virtual_key.name
+	// (exact match). The requests themselves are unaffected: they still reach the gateway's
+	// own logs and governance. Shared across profiles, like PluginSpanFilter. Use it for a
+	// caller whose volume would swamp a trace store without telling the story it is for
+	// (a batch sweep, a load test).
+	ExcludeVirtualKeys []string `json:"exclude_virtual_keys,omitempty"`
 }
 
 // UnmarshalJSON normalizes both supported config shapes into Profiles. A wrapper object
@@ -245,7 +254,20 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	c.Profiles = []*Profile{&prof}
 	c.PluginSpanFilter = spanFilterFrom(data)
+	c.ExcludeVirtualKeys = excludeVirtualKeysFrom(data)
 	return nil
+}
+
+// excludeVirtualKeysFrom extracts a top-level exclude_virtual_keys list from a JSON
+// object, or nil.
+func excludeVirtualKeysFrom(data []byte) []string {
+	var c struct {
+		ExcludeVirtualKeys []string `json:"exclude_virtual_keys,omitempty"`
+	}
+	if err := sonic.Unmarshal(data, &c); err != nil {
+		return nil
+	}
+	return c.ExcludeVirtualKeys
 }
 
 // spanFilterCarrier captures only the plugin_span_filter field from a config or profile object.
@@ -307,8 +329,9 @@ type profileForStorage struct {
 
 // configForStorage is the persisted wrapper shape.
 type configForStorage struct {
-	Profiles         []profileForStorage `json:"profiles"`
-	PluginSpanFilter *PluginSpanFilter   `json:"plugin_span_filter,omitempty"`
+	Profiles           []profileForStorage `json:"profiles"`
+	PluginSpanFilter   *PluginSpanFilter   `json:"plugin_span_filter,omitempty"`
+	ExcludeVirtualKeys []string            `json:"exclude_virtual_keys,omitempty"`
 }
 
 // MarshalForStorage serializes Config to JSON with *SecretVar fields as plain strings
@@ -317,8 +340,9 @@ type configForStorage struct {
 // For HTTP API responses use json.Marshal directly so clients receive full SecretVar objects.
 func (c *Config) MarshalForStorage() ([]byte, error) {
 	out := configForStorage{
-		Profiles:         make([]profileForStorage, 0, len(c.Profiles)),
-		PluginSpanFilter: c.PluginSpanFilter,
+		Profiles:           make([]profileForStorage, 0, len(c.Profiles)),
+		PluginSpanFilter:   c.PluginSpanFilter,
+		ExcludeVirtualKeys: c.ExcludeVirtualKeys,
 	}
 	for _, p := range c.Profiles {
 		if p == nil {
@@ -360,7 +384,7 @@ func (c *Config) Redacted() *Config {
 	if c == nil {
 		return nil
 	}
-	redacted := &Config{PluginSpanFilter: c.PluginSpanFilter}
+	redacted := &Config{PluginSpanFilter: c.PluginSpanFilter, ExcludeVirtualKeys: c.ExcludeVirtualKeys}
 	if c.Profiles != nil {
 		redacted.Profiles = make([]*Profile, 0, len(c.Profiles))
 		for _, p := range c.Profiles {
@@ -496,6 +520,9 @@ type OtelPlugin struct {
 	pricingManager *modelcatalog.ModelCatalog
 
 	pluginSpanFilter *PluginSpanFilter
+
+	// excludeVirtualKeys is Config.ExcludeVirtualKeys as a set; see excludedTrace.
+	excludeVirtualKeys map[string]struct{}
 }
 
 // Init function for the OTEL plugin
@@ -546,6 +573,7 @@ func Init(ctx context.Context, config *Config, _logger schemas.Logger, pricingMa
 		attributesFromEnvironment: attributesFromEnvironment,
 		instanceAttrs:             instanceAttrs,
 		pluginSpanFilter:          config.PluginSpanFilter,
+		excludeVirtualKeys:        virtualKeySet(config.ExcludeVirtualKeys),
 	}
 	p.ctx, p.cancel = context.WithCancel(ctx)
 
@@ -799,7 +827,7 @@ func (p *OtelPlugin) PreLLMHook(_ *schemas.BifrostContext, req *schemas.BifrostR
 // This is the ONLY place RecordCacheHit is called — do not also emit it from
 // recordMetricsFromTrace, or cache hits will double-count.
 func (p *OtelPlugin) PostLLMHook(ctx *schemas.BifrostContext, resp *schemas.BifrostResponse, bifrostErr *schemas.BifrostError) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
-	if resp == nil || !p.anyMetricsEnabled() {
+	if resp == nil || !p.anyMetricsEnabled() || p.excludedContext(ctx) {
 		return resp, bifrostErr, nil
 	}
 	extra := resp.GetExtraFields()
@@ -841,7 +869,7 @@ func (p *OtelPlugin) anyMetricsEnabled() bool {
 // this once per completed request; it is a no-op when no profile has metrics enabled.
 // Non-positive sizes are skipped (fasthttp reports -1 when Content-Length is unknown).
 func (p *OtelPlugin) RecordHTTPMetrics(ctx context.Context, path, method, status string, durationSeconds, requestSizeBytes, responseSizeBytes float64) {
-	if !p.anyMetricsEnabled() {
+	if !p.anyMetricsEnabled() || p.excludedContext(ctx) {
 		return
 	}
 	attrs := BuildHTTPAttributes(path, method, status)
@@ -865,7 +893,7 @@ func (p *OtelPlugin) RecordHTTPMetrics(ctx context.Context, path, method, status
 // This method is called asynchronously by TracingMiddleware after the response
 // has been written to the client.
 func (p *OtelPlugin) Inject(ctx context.Context, trace *schemas.Trace) error {
-	if trace == nil {
+	if trace == nil || p.excludedTrace(trace) {
 		return nil
 	}
 	// Emit the trace to every configured profile's collector, and record metrics against
@@ -902,6 +930,66 @@ func (p *OtelPlugin) Inject(ctx context.Context, trace *schemas.Trace) error {
 	}
 	wg.Wait()
 	return nil
+}
+
+// virtualKeySet builds the exclude_virtual_keys lookup; blank entries are ignored.
+func virtualKeySet(keys []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			set[k] = struct{}{}
+		}
+	}
+	return set
+}
+
+// excludedVirtualKey reports whether either identity of a virtual key is listed in
+// exclude_virtual_keys.
+func (p *OtelPlugin) excludedVirtualKey(id, name string) bool {
+	if len(p.excludeVirtualKeys) == 0 {
+		return false
+	}
+	if _, ok := p.excludeVirtualKeys[id]; ok && id != "" {
+		return true
+	}
+	_, ok := p.excludeVirtualKeys[name]
+	return ok && name != ""
+}
+
+// excludedTrace reports whether the trace belongs to an excluded virtual key. The key is
+// stamped on the provider-attempt spans (bifrost.virtual_key.id / .name), so every span is
+// checked, the root included; a trace that carries no virtual key is never excluded.
+func (p *OtelPlugin) excludedTrace(trace *schemas.Trace) bool {
+	if len(p.excludeVirtualKeys) == 0 {
+		return false
+	}
+	spanExcluded := func(span *schemas.Span) bool {
+		return span != nil && p.excludedVirtualKey(
+			getStringAttr(span.Attributes, schemas.AttrBifrostVirtualKeyID),
+			getStringAttr(span.Attributes, schemas.AttrBifrostVirtualKeyName),
+		)
+	}
+	if spanExcluded(trace.RootSpan) {
+		return true
+	}
+	for _, span := range trace.Spans {
+		if spanExcluded(span) {
+			return true
+		}
+	}
+	return false
+}
+
+// excludedContext is excludedTrace for the hook-based metrics, which read the virtual key
+// from the request context because they fire without a completed span.
+func (p *OtelPlugin) excludedContext(ctx context.Context) bool {
+	if len(p.excludeVirtualKeys) == 0 || ctx == nil {
+		return false
+	}
+	return p.excludedVirtualKey(
+		bifrost.GetStringFromContext(ctx, schemas.BifrostContextKeyGovernanceVirtualKeyID),
+		bifrost.GetStringFromContext(ctx, schemas.BifrostContextKeyGovernanceVirtualKeyName),
+	)
 }
 
 // ExportStats reports per-target export health: how many exports failed and how many
